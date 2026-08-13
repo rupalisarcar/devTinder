@@ -1,24 +1,68 @@
 const express = require("express");
-const app = express();
 const connectDB = require("./config/database")
-const { adminAuth } = require("./middleware/auth")
+const bcrypt = require("bcrypt");
+const cookieParser = require('cookie-parser')
+const jwt = require("jsonwebtoken");
 
+
+const { userAuth } = require("./middleware/auth");
 const User = require('./models/user');
+const { validationSignUP } = require("./utils/validation");
 
-app.use(express.json())
+const app = express();
+
+app.use(express.json());
+app.use(cookieParser());
 
 app.post('/signUp',async (req,res)=>{
-    // creating a new instance of the model
-   const user = new User(req.body);
-   console.log(req.body)
     try{
+    validationSignUP(req)
+    // creating a new instance of the model
+
+    const { firstName, lastName, email, password } = req.body;
+    const passwordHash = await bcrypt.hash(password, 12)
+    const user = new User({
+        firstName, lastName, email, password : passwordHash
+    });
+    console.log(req.body)
+    
         await user.save();
         res.status(201).send("User Saved successfully")
     }catch(err){
-        res.status(401).send("Error saving the user "+ err.message)
+        res.status(401).send("Error saving the  :  "+ err.message)
     }
 })
 
+
+app.post("/login", async (req,res)=>{
+    try{
+        const { email, password } = req.body;
+
+        const user = await User.findOne({email : email})
+        if(!user){
+            throw new Error("Invalid credentials")
+        }
+        const passwordValid = await bcrypt.compare(password,user.password)
+        if(!passwordValid){
+            throw new Error("Invalid credentials")
+        }else{
+            const jwtToken = await jwt.sign({_id:user._id},"LearningNode854@")
+            res.cookie('token', jwtToken)
+            res.send("Login successfully.")
+        }
+    }catch(err){
+        res.status(401).send("Error saving the  :  "+ err.message)
+    }
+})
+
+app.get('/profile', userAuth, async (req,res)=>{
+    try{
+        const getUser = req.user
+        res.send(getUser)
+    }catch(err){
+        res.status(401).send("Error : "+err.message)
+    }
+})
 
 app.get("/alluser",async (req,res)=>{
     const users = await User.find({})
@@ -54,17 +98,31 @@ app.delete("/user",async (req,res)=>{
     }
 })
 
-app.patch("/user",async (req,res)=>{
-    const userId = req.body.userId;
+app.patch("/user/:userId",async (req,res)=>{
+    const userId = req.params.userId;
     const data = req.body
     try{
+        const allowdUpdatesArr = ["lastName", "age", "gender", "photoUrl", "skills"]
+
+        const allowedUpdate = Object.keys(data).every((k)=>
+            allowdUpdatesArr.includes(k)
+        )
+
+        if(!allowedUpdate){
+            throw new Error("Update not allowd")
+        }
+
+        if(data?.skills.length>10){
+            throw new Error("Skiils not more than 10")
+        }
         const user = await User.findByIdAndUpdate(userId,data,{
-            "returnDocument" : "after"
+            "returnDocument" : "after",
+            "runValidators" : true
         });
         console.log("updated = ", user)
         res.status(200).send("User is updated successfully")
     }catch(err){
-        res.status(401).send("Something went wrong",err.message)
+        res.status(401).send("Something went wrong : "+err.message)
     }
 })
 
@@ -82,7 +140,7 @@ app.patch("/userByEmail",async (req,res)=>{
     }
 })
 
-app.use("/user",adminAuth)
+app.use("/user",userAuth)
 
 
 
